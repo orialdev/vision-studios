@@ -69,15 +69,39 @@ do
 
         local j = "https://raw.githubusercontent.com/Footagesus/Icons/main/Main-v2.lua"
 
-        local l_content
-        if game.HttpGet then 
-            l_content = game:HttpGet(j)
-        else
-            l_content = h:GetAsync(j)
+        local l
+        local iconLoadSuccess = pcall(function()
+            local l_content
+            if game.HttpGet then 
+                l_content = game:HttpGet(j)
+            else
+                l_content = h:GetAsync(j)
+            end
+            local loaded = loadstring(l_content)()
+            if loaded and loaded.SetIconsType then
+                loaded.SetIconsType("lucide")
+            end
+            l = loaded
+        end)
+        if not iconLoadSuccess or not l then
+            l = {
+                SetIconsType = function() end,
+                Icon = function(name)
+                    return { "", { ImageRectSize = Vector2.zero, ImageRectPosition = Vector2.zero } }
+                end,
+                AddIcons = function() end,
+                Image = function()
+                    local f = Instance.new("Frame")
+                    f.BackgroundTransparency = 1
+                    local img = Instance.new("ImageLabel")
+                    img.Name = "ImageLabel"
+                    img.BackgroundTransparency = 1
+                    img.Size = UDim2.new(1, 0, 1, 0)
+                    img.Parent = f
+                    return { IconFrame = f }
+                end
+            }
         end
-
-        local l = loadstring(l_content)()
-        l.SetIconsType("lucide")
 
         local m
 
@@ -187,10 +211,14 @@ do
         end
 
         function p.DisconnectAll()
-            for r, u in next, p.Signals do
-                local v = table.remove(p.Signals, r)
-                v:Disconnect()
+            for _, conn in ipairs(p.Signals) do
+                if typeof(conn) == "RBXScriptConnection" and conn.Connected then
+                    pcall(function()
+                        conn:Disconnect()
+                    end)
+                end
             end
+            table.clear(p.Signals)
         end
 
         function p.SafeCallback(r, ...)
@@ -274,8 +302,17 @@ do
 
         function p.UpdateFont(r)
             p.Font = r
-            for u, v in next, p.FontObjects do
-                v.FontFace = Font.new(r, v.FontFace.Weight, v.FontFace.Style)
+            for u = #p.FontObjects, 1, -1 do
+                local v = p.FontObjects[u]
+                if v and v.Parent then
+                    pcall(function()
+                        local weight = (v.FontFace and v.FontFace.Weight) or Enum.FontWeight.Regular
+                        local style = (v.FontFace and v.FontFace.Style) or Enum.FontStyle.Normal
+                        v.FontFace = Font.new(r, weight, style)
+                    end)
+                else
+                    table.remove(p.FontObjects, u)
+                end
             end
         end
 
@@ -370,52 +407,55 @@ do
 
         function p.UpdateTheme(r, u)
             local function ApplyTheme(v)
-                for x, z in pairs(v.Properties or {}) do
-                    local A = p.GetThemeProperty(z, p.Theme)
-                    if A ~= nil then
-                        if typeof(A) == "Color3" then
+                if not v or not v.Object or not v.Object.Parent then return end
+                pcall(function()
+                    for x, z in pairs(v.Properties or {}) do
+                        local A = p.GetThemeProperty(z, p.Theme)
+                        if A ~= nil then
+                            if typeof(A) == "Color3" then
+                                local B = v.Object:FindFirstChild "WindUIGradient"
+                                if B then
+                                    B:Destroy()
+                                end
+
+                                if not u then
+                                    v.Object[x] = A
+                                else
+                                    p.Tween(v.Object, 0.08, {[x] = A}):Play()
+                                end
+                            elseif typeof(A) == "table" and A.Color and A.Transparency then
+                                v.Object[x] = Color3.new(1, 1, 1)
+
+                                local B = v.Object:FindFirstChild "WindUIGradient"
+                                if not B then
+                                    B = Instance.new "UIGradient"
+                                    B.Name = "WindUIGradient"
+                                    B.Parent = v.Object
+                                end
+
+                                B.Color = A.Color
+                                B.Transparency = A.Transparency
+
+                                for C, F in pairs(A) do
+                                    if C ~= "Color" and C ~= "Transparency" and B[C] ~= nil then
+                                        B[C] = F
+                                    end
+                                end
+                            elseif typeof(A) == "number" then
+                                if not u then
+                                    v.Object[x] = A
+                                else
+                                    p.Tween(v.Object, 0.08, {[x] = A}):Play()
+                                end
+                            end
+                        else
                             local B = v.Object:FindFirstChild "WindUIGradient"
                             if B then
                                 B:Destroy()
                             end
-
-                            if not u then
-                                v.Object[x] = A
-                            else
-                                p.Tween(v.Object, 0.08, {[x] = A}):Play()
-                            end
-                        elseif typeof(A) == "table" and A.Color and A.Transparency then
-                            v.Object[x] = Color3.new(1, 1, 1)
-
-                            local B = v.Object:FindFirstChild "WindUIGradient"
-                            if not B then
-                                B = Instance.new "UIGradient"
-                                B.Name = "WindUIGradient"
-                                B.Parent = v.Object
-                            end
-
-                            B.Color = A.Color
-                            B.Transparency = A.Transparency
-
-                            for C, F in pairs(A) do
-                                if C ~= "Color" and C ~= "Transparency" and B[C] ~= nil then
-                                    B[C] = F
-                                end
-                            end
-                        elseif typeof(A) == "number" then
-                            if not u then
-                                v.Object[x] = A
-                            else
-                                p.Tween(v.Object, 0.08, {[x] = A}):Play()
-                            end
-                        end
-                    else
-                        local B = v.Object:FindFirstChild "WindUIGradient"
-                        if B then
-                            B:Destroy()
                         end
                     end
-                end
+                end)
             end
 
             if r then
@@ -425,7 +465,11 @@ do
                 end
             else
                 for v, x in pairs(p.Objects) do
-                    ApplyTheme(x)
+                    if x and x.Object and x.Object.Parent then
+                        ApplyTheme(x)
+                    else
+                        p.Objects[v] = nil
+                    end
                 end
             end
         end
@@ -498,12 +542,36 @@ do
             p.UpdateLang()
         end
 
+        local fallbackIconRect = { ImageRectSize = Vector2.zero, ImageRectPosition = Vector2.zero }
+        setmetatable(fallbackIconRect, { __index = function() return Vector2.zero end })
+        local fallbackIcon = { "", fallbackIconRect }
+
         function p.Icon(r, u)
-            return l.Icon(r, nil, u ~= false)
+            if not r or r == "" then
+                return fallbackIcon
+            end
+            if l and l.Icon then
+                local success, res = pcall(function()
+                    return l.Icon(r, nil, u ~= false)
+                end)
+                if success and res and typeof(res) == "table" and res[1] and res[2] then
+                    return res
+                elseif success and res and typeof(res) == "string" then
+                    return { res, fallbackIconRect }
+                end
+            end
+            if typeof(r) == "string" and (r:find("rbxasset") or r:find("http")) then
+                return { r, fallbackIconRect }
+            end
+            return fallbackIcon
         end
 
         function p.AddIcons(r, u)
-            return l.AddIcons(r, u)
+            if l and l.AddIcons then
+                pcall(function()
+                    l.AddIcons(r, u)
+                end)
+            end
         end
 
         function p.New(r, u, v)
@@ -825,11 +893,12 @@ do
                     end
                 )
                 if not N then
+                    local execName = (identifyexecutor and identifyexecutor()) or "Executor"
                     warn(
-                        "[ WindUI.Creator ]  '" .. identifyexecutor() .. "' doesnt support the URL Images. Error: " .. O
+                        "[ WindUI.Creator ]  '" .. tostring(execName) .. "' doesnt support the URL Images. Error: " .. tostring(O)
                     )
 
-                    L:Destroy()
+                    pcall(function() L:Destroy() end)
                 end
             elseif v == "" then
                 L.Visible = false
@@ -2609,7 +2678,7 @@ do
                         ab(
                             "UICorner",
                             {
-                                CornerRadius = UDim.new(0, Window.UICorner)
+                                CornerRadius = UDim.new(0, Window and Window.UICorner or 24)
                             }
                         )
                     }
@@ -4788,11 +4857,15 @@ do
             ad.Folder = ac.Folder
             ad.Path = "WindUI/" .. tostring(ad.Folder) .. "/config/"
 
-            if not isfolder("WindUI/" .. ad.Folder) then
-                makefolder("WindUI/" .. ad.Folder)
-                if not isfolder("WindUI/" .. ad.Folder .. "/config/") then
-                    makefolder("WindUI/" .. ad.Folder .. "/config/")
-                end
+            if isfolder and makefolder then
+                pcall(function()
+                    if not isfolder("WindUI/" .. ad.Folder) then
+                        makefolder("WindUI/" .. ad.Folder)
+                    end
+                    if not isfolder("WindUI/" .. ad.Folder .. "/config/") then
+                        makefolder("WindUI/" .. ad.Folder .. "/config/")
+                    end
+                end)
             end
 
             local ag = ad:AllConfigs()
@@ -5047,8 +5120,14 @@ do
             end
 
             local af = {}
-            if not isfolder(ad.Path) then
-                makefolder(ad.Path)
+            if isfolder and makefolder then
+                pcall(function()
+                    if not isfolder(ad.Path) then
+                        makefolder(ad.Path)
+                    end
+                end)
+            end
+            if isfolder and not isfolder(ad.Path) then
                 return af
             end
 
@@ -12193,12 +12272,31 @@ end
                                 av:Highlight()
                             end
                             function au.Destroy(ay)
-                                av:Destroy()
+                                if av and av.Destroy then
+                                    pcall(function() av:Destroy() end)
+                                end
 
-                                table.remove(ah.AllElements, ar.GlobalIndex)
-                                table.remove(aa.Elements, ar.Index)
-                                table.remove(an.Elements, ar.Index)
-                                aa:UpdateAllElementShapes(aa)
+                                if ah and ah.AllElements then
+                                    local gIdx = table.find(ah.AllElements, au) or ar.GlobalIndex
+                                    if gIdx and ah.AllElements[gIdx] then
+                                        table.remove(ah.AllElements, gIdx)
+                                    end
+                                end
+                                if aa and aa.Elements then
+                                    local idx = table.find(aa.Elements, au) or ar.Index
+                                    if idx and aa.Elements[idx] then
+                                        table.remove(aa.Elements, idx)
+                                    end
+                                end
+                                if an and an.Elements then
+                                    local nIdx = table.find(an.Elements, au) or ar.Index
+                                    if nIdx and an.Elements[nIdx] then
+                                        table.remove(an.Elements, nIdx)
+                                    end
+                                end
+                                if aa and aa.UpdateAllElementShapes then
+                                    pcall(function() aa:UpdateAllElementShapes(aa) end)
+                                end
                             end
                         end
 
@@ -14035,19 +14133,21 @@ end
                 as.Topbar = {Height = 52, ButtonsType = "Default"}
             end
 
-            if as.Folder then
-                if not isfolder("WindUI/" .. as.Folder) then
-                    makefolder("WindUI/" .. as.Folder)
-                end
-                if not isfolder("WindUI/" .. as.Folder .. "/assets") then
-                    makefolder("WindUI/" .. as.Folder .. "/assets")
-                end
-                if not isfolder(as.Folder) then
-                    makefolder(as.Folder)
-                end
-                if not isfolder(as.Folder .. "/assets") then
-                    makefolder(as.Folder .. "/assets")
-                end
+            if as.Folder and isfolder and makefolder then
+                pcall(function()
+                    if not isfolder("WindUI/" .. as.Folder) then
+                        makefolder("WindUI/" .. as.Folder)
+                    end
+                    if not isfolder("WindUI/" .. as.Folder .. "/assets") then
+                        makefolder("WindUI/" .. as.Folder .. "/assets")
+                    end
+                    if not isfolder(as.Folder) then
+                        makefolder(as.Folder)
+                    end
+                    if not isfolder(as.Folder .. "/assets") then
+                        makefolder(as.Folder .. "/assets")
+                    end
+                end)
             end
 
             local av =
@@ -15201,12 +15301,13 @@ end
             end
 
             function as.TopbarButton(v, btnProps)
-                local props = btnProps or v
+                if as.Destroyed then return end
+                local props = (typeof(btnProps) == "table" and btnProps) or (typeof(v) == "table" and v) or {}
                 local name = props.Name or props.Title or "Button"
                 local icon = props.Icon or "star"
                 local callback = props.Callback or function() end
                 
-                local order = #as.TopBarButtons + 1
+                local order = (as.TopBarButtons and #as.TopBarButtons or 0) + 1
                 
                 return as:CreateTopbarButton(
                     name, icon, callback, order, nil, nil, 
@@ -15215,9 +15316,12 @@ end
             end
 
             function as.TopbarLabel(v, labelProps)
-                local props = labelProps or v
+                if as.Destroyed then return { SetText = function() end, Update = function() end } end
+                local props = (typeof(labelProps) == "table" and labelProps) or (typeof(v) == "table" and v) or {}
                 local text = props.Text or "Label"
                 local color = props.Color or Color3.fromRGB(150, 150, 150)
+                
+                local parent = (as.UIElements and as.UIElements.Main and as.UIElements.Main:FindFirstChild("Main") and as.UIElements.Main.Main:FindFirstChild("Topbar") and as.UIElements.Main.Main.Topbar:FindFirstChild("Right"))
                 
                 local lbl = ak("TextLabel", {
                     Text = text,
@@ -15229,13 +15333,13 @@ end
                     TextSize = 13,
                     ThemeTag = { TextColor3 = "WindowTopbarTitle", TextTransparency = 0.4 },
                     LayoutOrder = 1,
-                    Parent = as.UIElements.Main.Main.Topbar.Right
+                    Parent = parent
                 })
                 
                 return {
                     Label = lbl,
-                    SetText = function(self, t) lbl.Text = t end,
-                    Update = function(self, t) lbl.Text = t end
+                    SetText = function(self, t) if lbl then lbl.Text = t end end,
+                    Update = function(self, t) if lbl then lbl.Text = t end end
                 }
             end
 
@@ -15347,6 +15451,7 @@ end
             end
 
             function as.Open(p)
+                if as.Destroyed then return end
                 task.spawn(
                     function()
                         if as.OnOpenCallback then
@@ -15360,17 +15465,19 @@ end
                         task.wait(.06)
                         as.Closed = false
 
-                        al(
-                            as.UIElements.Main.Background,
-                            0.2,
-                            {
-                                ImageTransparency = as.Transparent and ar.WindUI.TransparencyValue or 0
-                            },
-                            Enum.EasingStyle.Quint,
-                            Enum.EasingDirection.Out
-                        ):Play()
+                        if as.UIElements and as.UIElements.Main and as.UIElements.Main:FindFirstChild("Background") then
+                            al(
+                                as.UIElements.Main.Background,
+                                0.2,
+                                {
+                                    ImageTransparency = as.Transparent and ar.WindUI.TransparencyValue or 0
+                                },
+                                Enum.EasingStyle.Quint,
+                                Enum.EasingDirection.Out
+                            ):Play()
+                        end
 
-                        if as.UIElements.BackgroundGradient then
+                        if as.UIElements and as.UIElements.BackgroundGradient then
                             al(
                                 as.UIElements.BackgroundGradient,
                                 0.2,
@@ -15382,15 +15489,17 @@ end
                             ):Play()
                         end
 
-                        al(
-                            as.UIElements.Main.Background,
-                            0.4,
-                            {
-                                Size = UDim2.new(1, 0, 1, 0)
-                            },
-                            Enum.EasingStyle.Exponential,
-                            Enum.EasingDirection.Out
-                        ):Play()
+                        if as.UIElements and as.UIElements.Main and as.UIElements.Main:FindFirstChild("Background") then
+                            al(
+                                as.UIElements.Main.Background,
+                                0.4,
+                                {
+                                    Size = UDim2.new(1, 0, 1, 0)
+                                },
+                                Enum.EasingStyle.Exponential,
+                                Enum.EasingDirection.Out
+                            ):Play()
+                        end
 
                         if aE then
                             if aE:IsA "VideoFrame" then
@@ -15412,32 +15521,36 @@ end
                             as.OpenButtonMain:Visible(false)
                         end
 
-                        al(
-                            az,
-                            0.25,
-                            {ImageTransparency = as.ShadowTransparency},
-                            Enum.EasingStyle.Quint,
-                            Enum.EasingDirection.Out
-                        ):Play()
+                        if az then
+                            al(
+                                az,
+                                0.25,
+                                {ImageTransparency = as.ShadowTransparency},
+                                Enum.EasingStyle.Quint,
+                                Enum.EasingDirection.Out
+                            ):Play()
+                        end
                         if UIStroke then
-                            al(UIStroke, 0.25, {Transparency = .8}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out):Play(
-
-                            )
+                            al(UIStroke, 0.25, {Transparency = .8}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out):Play()
                         end
 
                         task.spawn(
                             function()
                                 task.wait(.3)
-                                al(
-                                    d,
-                                    .45,
-                                    {Size = UDim2.new(0, 200, 0, 4), ImageTransparency = .8},
-                                    Enum.EasingStyle.Exponential,
-                                    Enum.EasingDirection.Out
-                                ):Play()
-                                j:Set(true)
+                                if d then
+                                    al(
+                                        d,
+                                        .45,
+                                        {Size = UDim2.new(0, 200, 0, 4), ImageTransparency = .8},
+                                        Enum.EasingStyle.Exponential,
+                                        Enum.EasingDirection.Out
+                                    ):Play()
+                                end
+                                if j and j.Set then
+                                    j:Set(true)
+                                end
                                 task.wait(.45)
-                                if as.Resizable then
+                                if as.Resizable and aw and aw:FindFirstChild("ImageLabel") then
                                     al(
                                         aw.ImageLabel,
                                         .45,
@@ -15452,20 +15565,59 @@ end
 
                         as.CanDropdown = true
 
-                        as.UIElements.Main.Visible = true
-                        task.spawn(
-                            function()
-                                task.wait(.05)
-                                as.UIElements.Main:WaitForChild "Main".Visible = true
+                        if as.UIElements and as.UIElements.Main then
+                            as.UIElements.Main.Visible = true
+                            task.spawn(
+                                function()
+                                    task.wait(.05)
+                                    if as.UIElements and as.UIElements.Main then
+                                        local mainFrame = as.UIElements.Main:FindFirstChild("Main")
+                                        if mainFrame then
+                                            mainFrame.Visible = true
+                                        end
+                                    end
 
-                                ar.WindUI:ToggleAcrylic(true)
-                            end
-                        )
+                                    if ar.WindUI and ar.WindUI.ToggleAcrylic then
+                                        ar.WindUI:ToggleAcrylic(true)
+                                    end
+                                end
+                            )
+                        end
                     end
                 )
             end
+
             function as.Close(p)
                 local r = {}
+
+                if as.Destroyed or as.Closed then
+                    function r.Destroy(u)
+                        if as.Destroyed then return end
+                        as.Destroyed = true
+                        if ar.WindUI and ar.WindUI.Window == as then
+                            ar.WindUI.Window = nil
+                        end
+                        if as.OnDestroyCallback then
+                            task.spawn(function()
+                                aj.SafeCallback(as.OnDestroyCallback)
+                            end)
+                        end
+                        if as.AcrylicPaint and as.AcrylicPaint.Model then
+                            pcall(function() as.AcrylicPaint.Model:Destroy() end)
+                        end
+                        if as.OpenButtonMain and as.OpenButtonMain.Destroy then
+                            pcall(function() as.OpenButtonMain:Destroy() end)
+                        end
+                        if as.UIElements and as.UIElements.Main then
+                            pcall(function() as.UIElements.Main:Destroy() end)
+                        end
+                        aj.DisconnectAll()
+                    end
+                    return r
+                end
+
+                as.CanDropdown = false
+                as.Closed = true
 
                 if as.OnCloseCallback then
                     task.spawn(
@@ -15475,23 +15627,29 @@ end
                     )
                 end
 
-                ar.WindUI:ToggleAcrylic(false)
+                if ar.WindUI and ar.WindUI.ToggleAcrylic then
+                    ar.WindUI:ToggleAcrylic(false)
+                end
 
-                as.UIElements.Main:WaitForChild "Main".Visible = false
+                if as.UIElements and as.UIElements.Main then
+                    local mainFrame = as.UIElements.Main:FindFirstChild("Main")
+                    if mainFrame then
+                        mainFrame.Visible = false
+                    end
+                end
 
-                as.CanDropdown = false
-                as.Closed = true
-
-                al(
-                    as.UIElements.Main.Background,
-                    0.32,
-                    {
-                        ImageTransparency = 1
-                    },
-                    Enum.EasingStyle.Quint,
-                    Enum.EasingDirection.InOut
-                ):Play()
-                if as.UIElements.BackgroundGradient then
+                if as.UIElements and as.UIElements.Main and as.UIElements.Main:FindFirstChild("Background") then
+                    al(
+                        as.UIElements.Main.Background,
+                        0.32,
+                        {
+                            ImageTransparency = 1
+                        },
+                        Enum.EasingStyle.Quint,
+                        Enum.EasingDirection.InOut
+                    ):Play()
+                end
+                if as.UIElements and as.UIElements.BackgroundGradient then
                     al(
                         as.UIElements.BackgroundGradient,
                         0.32,
@@ -15503,15 +15661,17 @@ end
                     ):Play()
                 end
 
-                al(
-                    as.UIElements.Main.Background,
-                    0.4,
-                    {
-                        Size = UDim2.new(1, 0, 1, -240)
-                    },
-                    Enum.EasingStyle.Exponential,
-                    Enum.EasingDirection.InOut
-                ):Play()
+                if as.UIElements and as.UIElements.Main and as.UIElements.Main:FindFirstChild("Background") then
+                    al(
+                        as.UIElements.Main.Background,
+                        0.4,
+                        {
+                            Size = UDim2.new(1, 0, 1, -240)
+                        },
+                        Enum.EasingStyle.Exponential,
+                        Enum.EasingDirection.InOut
+                    ):Play()
+                end
 
                 if aE then
                     if aE:IsA "VideoFrame" then
@@ -15528,28 +15688,36 @@ end
                         ):Play()
                     end
                 end
-                al(az, 0.25, {ImageTransparency = 1}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out):Play()
+                if az then
+                    al(az, 0.25, {ImageTransparency = 1}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out):Play()
+                end
                 if UIStroke then
                     al(UIStroke, 0.25, {Transparency = 1}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out):Play()
                 end
 
-                al(
-                    d,
-                    .3,
-                    {Size = UDim2.new(0, 0, 0, 4), ImageTransparency = 1},
-                    Enum.EasingStyle.Exponential,
-                    Enum.EasingDirection.InOut
-                ):Play()
-                al(aw.ImageLabel, .3, {ImageTransparency = 1}, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out):Play(
-
-                )
-                j:Set(false)
+                if d then
+                    al(
+                        d,
+                        .3,
+                        {Size = UDim2.new(0, 0, 0, 4), ImageTransparency = 1},
+                        Enum.EasingStyle.Exponential,
+                        Enum.EasingDirection.InOut
+                    ):Play()
+                end
+                if aw and aw:FindFirstChild("ImageLabel") then
+                    al(aw.ImageLabel, .3, {ImageTransparency = 1}, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out):Play()
+                end
+                if j and j.Set then
+                    j:Set(false)
+                end
                 as.CanResize = false
 
                 task.spawn(
                     function()
                         task.wait(0.4)
-                        as.UIElements.Main.Visible = false
+                        if as.UIElements and as.UIElements.Main then
+                            as.UIElements.Main.Visible = false
+                        end
 
                         if as.OpenButtonMain and not as.Destroyed and not as.IsPC and as.IsOpenButtonEnabled then
                             as.OpenButtonMain:Visible(true)
@@ -15558,6 +15726,11 @@ end
                 )
 
                 function r.Destroy(u)
+                    if as.Destroyed then return end
+                    as.Destroyed = true
+                    if ar.WindUI and ar.WindUI.Window == as then
+                        ar.WindUI.Window = nil
+                    end
                     task.spawn(
                         function()
                             if as.OnDestroyCallback then
@@ -15568,14 +15741,22 @@ end
                                 )
                             end
                             if as.AcrylicPaint and as.AcrylicPaint.Model then
-                                as.AcrylicPaint.Model:Destroy()
+                                pcall(function() as.AcrylicPaint.Model:Destroy() end)
                             end
-                            as.Destroyed = true
+                            if as.OpenButtonMain and as.OpenButtonMain.Destroy then
+                                pcall(function() as.OpenButtonMain:Destroy() end)
+                            end
+                            if as.UIElements and as.UIElements.Main then
+                                pcall(function() as.UIElements.Main:Destroy() end)
+                            end
                             task.wait(0.4)
-                            ar.WindUI.ScreenGui:Destroy()
-                            ar.WindUI.NotificationGui:Destroy()
-                            ar.WindUI.DropdownGui:Destroy()
-                            ar.WindUI.TooltipGui:Destroy()
+                            if ar.WindUI then
+                                pcall(function() if ar.WindUI.ScreenGui then ar.WindUI.ScreenGui:Destroy() end end)
+                                pcall(function() if ar.WindUI.NotificationGui then ar.WindUI.NotificationGui:Destroy() end end)
+                                pcall(function() if ar.WindUI.DropdownGui then ar.WindUI.DropdownGui:Destroy() end end)
+                                pcall(function() if ar.WindUI.TooltipGui then ar.WindUI.TooltipGui:Destroy() end end)
+                                ar.WindUI.Window = nil
+                            end
 
                             aj.DisconnectAll()
 
@@ -15586,10 +15767,18 @@ end
 
                 return r
             end
+
             function as.Destroy(p)
+                if as.Destroyed then return end
+                as.Destroyed = true
+                if ar.WindUI and ar.WindUI.Window == as then
+                    ar.WindUI.Window = nil
+                end
                 return as:Close():Destroy()
             end
+
             function as.Toggle(p)
+                if as.Destroyed then return end
                 if as.Closed then
                     as:Open()
                 else
@@ -15599,11 +15788,17 @@ end
 
             function as.ToggleTransparency(p, r)
                 as.Transparent = r
-                ar.WindUI.Transparent = r
+                if ar.WindUI then
+                    ar.WindUI.Transparent = r
+                end
 
-                as.UIElements.Main.Background.ImageTransparency = r and ar.WindUI.TransparencyValue or 0
+                if as.UIElements and as.UIElements.Main and as.UIElements.Main:FindFirstChild("Background") then
+                    as.UIElements.Main.Background.ImageTransparency = r and (ar.WindUI and ar.WindUI.TransparencyValue or 0) or 0
+                end
 
-                as.UIElements.MainBar.Background.ImageTransparency = r and 0.97 or 0.95
+                if as.UIElements and as.UIElements.MainBar and as.UIElements.MainBar:FindFirstChild("Background") then
+                    as.UIElements.MainBar.Background.ImageTransparency = r and 0.97 or 0.95
+                end
             end
 
             function as.LockAll(p)
@@ -16146,7 +16341,8 @@ end
                 as:SetToTheCenter()
             end
 
-            d.Frame.MouseButton1Up:Connect(
+            aj.AddSignal(
+                d.Frame.MouseButton1Up,
                 function()
                     local G = tick()
                     local H = as.Position
@@ -16280,7 +16476,7 @@ local ar = a.load "q"
 local as = protectgui or (syn and syn.protect_gui) or function()
     end
 
-local au = gethui and gethui() or (aj or game.Players.LocalPlayer:WaitForChild "PlayerGui")
+local au = gethui and gethui() or (aj or (ak and ak:FindFirstChild("PlayerGui")) or (ah and ah.LocalPlayer and ah.LocalPlayer:FindFirstChild("PlayerGui")) or game:GetService("CoreGui"))
 
 local av =
     ap(
@@ -16501,24 +16697,98 @@ ao.Themes = aa.Themes
 aa:SetTheme "Dark"
 aa:SetLanguage(ao.Language)
 
+local function ensureGuis()
+    local isGuiValid = pcall(function()
+        return aa.ScreenGui and aa.ScreenGui.Parent and aa.ScreenGui:FindFirstChild("Window") and aa.NotificationGui and aa.NotificationGui.Parent and aa.DropdownGui and aa.DropdownGui.Parent and aa.TooltipGui and aa.TooltipGui.Parent
+    end)
+    
+    if not isGuiValid or not aa.ScreenGui or not aa.ScreenGui.Parent then
+        local targetParent = gethui and gethui() or (aj or (ak and ak:FindFirstChild("PlayerGui")) or (ah and ah.LocalPlayer and ah.LocalPlayer:FindFirstChild("PlayerGui")) or game:GetService("CoreGui"))
+        
+        aa.ScreenGui =
+            ap(
+            "ScreenGui",
+            {
+                Name = "WindUI",
+                Parent = targetParent,
+                IgnoreGuiInset = true,
+                ScreenInsets = "None"
+            },
+            {
+                ap("Folder", { Name = "Window" }),
+                ap("Folder", { Name = "KeySystem" }),
+                ap("Folder", { Name = "Popups" }),
+                ap("Folder", { Name = "ToolTips" })
+            }
+        )
+
+        aa.NotificationGui =
+            ap(
+            "ScreenGui",
+            {
+                Name = "WindUI/Notifications",
+                Parent = targetParent,
+                IgnoreGuiInset = true
+            }
+        )
+        aa.DropdownGui =
+            ap(
+            "ScreenGui",
+            {
+                Name = "WindUI/Dropdowns",
+                Parent = targetParent,
+                IgnoreGuiInset = true
+            }
+        )
+        aa.TooltipGui =
+            ap(
+            "ScreenGui",
+            {
+                Name = "WindUI/Tooltips",
+                Parent = targetParent,
+                IgnoreGuiInset = true
+            }
+        )
+        as(aa.ScreenGui)
+        as(aa.NotificationGui)
+        as(aa.DropdownGui)
+        as(aa.TooltipGui)
+
+        ao.Init(aa)
+        aw = aa.NotificationModule.Init(aa.NotificationGui)
+    end
+end
+
 function aa.CreateWindow(ax, ay)
     local az = a.load "Y"
 
-    if not isfolder "WindUI" then
-        makefolder "WindUI"
+    if isfolder and makefolder then
+        pcall(function()
+            if not isfolder "WindUI" then
+                makefolder "WindUI"
+            end
+            if ay.Folder then
+                makefolder(ay.Folder)
+            else
+                makefolder(ay.Title)
+            end
+        end)
     end
-    if ay.Folder then
-        makefolder(ay.Folder)
-    else
-        makefolder(ay.Title)
-    end
+
+    ensureGuis()
 
     ay.WindUI = aa
     ay.Parent = aa.ScreenGui.Window
 
     if aa.Window then
-        warn "You cannot create more than one window"
-        return
+        if aa.Window.Destroyed or not aa.Window.UIElements or not aa.Window.UIElements.Main or not aa.Window.UIElements.Main.Parent then
+            aa.Window = nil
+        else
+            pcall(function()
+                aa.Window:Destroy()
+            end)
+            aa.Window = nil
+        end
     end
 
     local aA = true
